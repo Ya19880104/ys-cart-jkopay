@@ -7,6 +7,7 @@ use YangSheep\YSCartJkopay\Api\Admin\YSJkopayTestConnectionController;
 use YangSheep\YSCartJkopay\Api\YSJkopayCallbackController;
 use YangSheep\YSCartJkopay\Gateway\Jkopay\YSJkopayGateway;
 use YangSheep\YSCartJkopay\Gateway\Jkopay\YSJkopaySettings;
+use YangSheep\Ecommerce\YSEcommerce;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -33,9 +34,17 @@ final class Plugin {
 	}
 
 	public function register_gateway(): void {
-		if ( class_exists( YSGatewayRegistry::class ) ) {
+		if ( class_exists( YSGatewayRegistry::class ) && $this->is_payment_enabled() ) {
 			YSGatewayRegistry::register( new YSJkopayGateway() );
 		}
+	}
+
+	private function is_payment_enabled(): bool {
+		if ( ! class_exists( YSEcommerce::class ) ) {
+			return false;
+		}
+
+		return '1' === (string) YSEcommerce::get_instance()->get_setting( 'ys_ec_jkopay_enabled', '0' );
 	}
 
 	/**
