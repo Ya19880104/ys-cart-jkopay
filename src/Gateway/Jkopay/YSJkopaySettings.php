@@ -30,6 +30,7 @@ defined( 'ABSPATH' ) || exit;
 use YangSheep\Ecommerce\Admin\YSAdminApp;
 use YangSheep\Ecommerce\Utils\YSCrypto;
 use YangSheep\Ecommerce\YSEcommerce;
+use YangSheep\YSCartJkopay\Plugin;
 
 class YSJkopaySettings {
 
@@ -78,7 +79,8 @@ class YSJkopaySettings {
         //            另以 $_GET['page'] 補強，因為 BATCH G4 的 admin menu 可能尚未 wire 進來。
         $page = isset( $_GET['page'] ) ? sanitize_text_field( wp_unslash( (string) $_GET['page'] ) ) : '';
         $is_jkopay_page = false !== strpos( $hook, 'ys-ecommerce-jkopay' )
-            || 'ys-ecommerce-jkopay' === $page;
+            || false !== strpos( $hook, 'ys-provider-jkopay' )
+            || in_array( $page, [ 'ys-ecommerce-jkopay', 'ys-provider-jkopay' ], true );
 
         if ( ! $is_jkopay_page ) {
             return;
@@ -155,6 +157,7 @@ class YSJkopaySettings {
         $secret_key_is_set = '' !== (string) ( $raw['secret_key'] ?? '' );
 
         $out = $raw;
+        $out['enabled'] = self::is_provider_enabled() ? '1' : '0';
         // **永不**把（即便已解密的）金鑰塞進 template 變數
         $out['api_key']           = '';
         $out['secret_key']        = '';
@@ -201,6 +204,7 @@ class YSJkopaySettings {
             self::SETTING_KEYS['enabled'],
             isset( $_POST['ys_ec_jkopay_enabled'] ) ? '1' : '0'
         );
+        self::sync_provider_lifecycle( isset( $_POST['ys_ec_jkopay_enabled'] ) );
         $ec->update_setting(
             self::SETTING_KEYS['test_mode'],
             isset( $_POST['ys_ec_jkopay_test_mode'] ) ? '1' : '0'
@@ -253,7 +257,7 @@ class YSJkopaySettings {
         $ec->update_setting( self::SETTING_KEYS['payment_type'], $payment_type );
 
         // 完成後 redirect 回設定頁
-        $redirect = wp_get_referer() ?: admin_url( 'admin.php?page=ys-ecommerce' );
+        $redirect = wp_get_referer() ?: admin_url( 'admin.php?page=ys-provider-jkopay' );
         wp_safe_redirect( add_query_arg( 'ys_ec_jkopay_saved', '1', $redirect ) );
         exit;
     }
@@ -300,5 +304,21 @@ class YSJkopaySettings {
      */
     public static function get_nonce_action(): string {
         return self::NONCE_ACTION;
+    }
+
+    private static function is_provider_enabled(): bool {
+        if ( class_exists( '\YangSheep\Ecommerce\Core\Provider\YSProviderLifecycleState' ) ) {
+            return \YangSheep\Ecommerce\Core\Provider\YSProviderLifecycleState::is_provider_enabled( 'ys_jkopay', Plugin::manifest() );
+        }
+
+        return '1' === (string) YSEcommerce::get_instance()->get_setting( self::SETTING_KEYS['enabled'], '0' );
+    }
+
+    private static function sync_provider_lifecycle( bool $enabled ): void {
+        if ( ! class_exists( '\YangSheep\Ecommerce\Core\Provider\YSProviderLifecycleState' ) ) {
+            return;
+        }
+
+        \YangSheep\Ecommerce\Core\Provider\YSProviderLifecycleState::set_provider_enabled( 'ys_jkopay', $enabled, Plugin::manifest() );
     }
 }

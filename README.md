@@ -11,7 +11,7 @@ External JKoPay gateway provider for YS CART.
 ## Provider contract
 
 - Gateway ID: `ys_ec_jkopay`
-- Admin page slug: `ys-ecommerce-jkopay`
+- Admin page slug: `ys-provider-jkopay`
 - Payment callback: `/wp-json/ys-ecommerce-headless/v1/payment/jkopay/callback`
 - Admin test route: `/wp-json/ys-ecommerce-headless/v1/admin/jkopay/test-connection`
 

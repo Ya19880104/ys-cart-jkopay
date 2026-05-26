@@ -24,6 +24,7 @@ use YangSheep\Ecommerce\Models\YSOrder;
 use YangSheep\Ecommerce\Utils\YSLogger;
 use YangSheep\Ecommerce\Utils\YSPriceHelper;
 use YangSheep\Ecommerce\YSEcommerce;
+use YangSheep\YSCartJkopay\Plugin;
 
 class YSJkopayGateway implements YSGatewayInterface {
 
@@ -78,6 +79,14 @@ class YSJkopayGateway implements YSGatewayInterface {
     }
 
     public function is_enabled(): bool {
+        if ( class_exists( '\YangSheep\Ecommerce\Core\Provider\YSProviderLifecycleState' ) ) {
+            return \YangSheep\Ecommerce\Core\Provider\YSProviderLifecycleState::is_method_enabled(
+                'payment',
+                self::GATEWAY_ID,
+                Plugin::manifest()
+            );
+        }
+
         $ec = YSEcommerce::get_instance();
         return $ec->get_setting( 'ys_ec_jkopay_enabled', '0' ) === '1';
     }
@@ -454,6 +463,6 @@ class YSJkopayGateway implements YSGatewayInterface {
      * 取得後台設定頁網址
      */
     public function get_settings_url(): string {
-        return admin_url( 'admin.php?page=ys-ecommerce-jkopay' );
+        return admin_url( 'admin.php?page=ys-provider-jkopay' );
     }
 }

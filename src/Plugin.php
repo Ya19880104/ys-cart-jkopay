@@ -25,12 +25,33 @@ final class Plugin {
 	public function init(): void {
 		YSJkopaySettings::register();
 
+		add_filter( 'ys_ec_provider_manifests', [ $this, 'register_manifest' ], 10, 1 );
 		add_action( 'ys_ec_register_gateways', [ $this, 'register_gateway' ] );
-		add_filter( 'ys_ec_providers', [ $this, 'register_provider' ] );
-		add_action( 'ys_ec_admin_payment_menus', [ $this, 'register_admin_menu' ], 10, 2 );
 		add_action( 'ys_ec_register_admin_rest_routes', [ $this, 'register_admin_routes' ] );
 		add_action( 'ys_ec_register_storefront_routes', [ $this, 'register_storefront_routes' ] );
-		add_filter( 'ys_ec_external_admin_pages', [ $this, 'register_external_admin_page' ] );
+	}
+
+	/**
+	 * @param array<int,array<string,mixed>> $manifests
+	 * @return array<int,array<string,mixed>>
+	 */
+	public function register_manifest( array $manifests ): array {
+		$manifests[] = self::manifest();
+
+		return $manifests;
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	public static function manifest(): array {
+		static $manifest = null;
+
+		if ( null === $manifest ) {
+			$manifest = require YS_CART_JKOPAY_DIR . 'manifest.php';
+		}
+
+		return $manifest;
 	}
 
 	public function register_gateway(): void {
@@ -40,6 +61,10 @@ final class Plugin {
 	}
 
 	private function is_payment_enabled(): bool {
+		if ( class_exists( '\YangSheep\Ecommerce\Core\Provider\YSProviderLifecycleState' ) ) {
+			return \YangSheep\Ecommerce\Core\Provider\YSProviderLifecycleState::is_method_enabled( 'payment', YSJkopayGateway::GATEWAY_ID, self::manifest() );
+		}
+
 		if ( ! class_exists( YSEcommerce::class ) ) {
 			return false;
 		}
@@ -47,37 +72,12 @@ final class Plugin {
 		return '1' === (string) YSEcommerce::get_instance()->get_setting( 'ys_ec_jkopay_enabled', '0' );
 	}
 
-	/**
-	 * @param array<string,array<string,mixed>> $providers
-	 * @return array<string,array<string,mixed>>
-	 */
-	public function register_provider( array $providers ): array {
-		$providers['jkopay'] = [
-			'name'        => '街口支付',
-			'icon'        => 'dashicons-money-alt',
-			'description' => '街口支付直連 OnlinePay 收款。',
-			'payment'     => [ '街口支付' ],
-			'shipping'    => [],
-			'setting_key' => 'ys_ec_jkopay_enabled',
-			'admin_url'   => admin_url( 'admin.php?page=ys-ecommerce-jkopay' ),
-		];
-
-		return $providers;
-	}
-
-	public function register_admin_menu( string $parent_slug, string $capability ): void {
-		add_submenu_page(
-			$parent_slug,
-			'街口支付設定',
-			'街口支付',
-			$capability,
-			'ys-ecommerce-jkopay',
-			[ YSJkopaySettings::class, 'render_page' ]
-		);
-	}
-
 	public function register_admin_routes( $registrar = null ): void {
 		unset( $registrar );
+
+		if ( ! $this->is_payment_enabled() ) {
+			return;
+		}
 
 		YSJkopayTestConnectionController::register_routes();
 	}
@@ -85,16 +85,8 @@ final class Plugin {
 	public function register_storefront_routes( string $namespace = '' ): void {
 		unset( $namespace );
 
-		YSJkopayCallbackController::register_routes();
-	}
-
-	/**
-	 * @param array<int,string> $pages
-	 * @return array<int,string>
-	 */
-	public function register_external_admin_page( array $pages ): array {
-		$pages[] = 'ys-ecommerce-jkopay';
-
-		return array_values( array_unique( $pages ) );
+		if ( $this->is_payment_enabled() ) {
+			YSJkopayCallbackController::register_routes();
+		}
 	}
 }
