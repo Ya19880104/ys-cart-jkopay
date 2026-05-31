@@ -5,7 +5,9 @@ namespace YangSheep\YSCartJkopay;
 use YangSheep\Ecommerce\Gateways\YSGatewayRegistry;
 use YangSheep\YSCartJkopay\Api\Admin\YSJkopayTestConnectionController;
 use YangSheep\YSCartJkopay\Api\YSJkopayCallbackController;
+use YangSheep\YSCartJkopay\Gateway\Jkopay\YSJkopayClient;
 use YangSheep\YSCartJkopay\Gateway\Jkopay\YSJkopayGateway;
+use YangSheep\YSCartJkopay\Gateway\Jkopay\YSJkopayPaymentReconciler;
 use YangSheep\YSCartJkopay\Gateway\Jkopay\YSJkopaySettings;
 use YangSheep\Ecommerce\YSEcommerce;
 
@@ -29,6 +31,7 @@ final class Plugin {
 		add_action( 'ys_ec_register_gateways', [ $this, 'register_gateway' ] );
 		add_action( 'ys_ec_register_admin_rest_routes', [ $this, 'register_admin_routes' ] );
 		add_action( 'ys_ec_register_storefront_routes', [ $this, 'register_storefront_routes' ] );
+		add_action( 'ys_ec_register_payment_reconcilers', [ $this, 'register_payment_reconciler' ] );
 	}
 
 	/**
@@ -88,5 +91,22 @@ final class Plugin {
 		if ( $this->is_payment_enabled() ) {
 			YSJkopayCallbackController::register_routes();
 		}
+	}
+
+	public function register_payment_reconciler( $registry ): void {
+		if ( ! $this->is_payment_enabled() ) {
+			return;
+		}
+
+		if ( ! interface_exists( '\YangSheep\Ecommerce\Services\Payment\YSPaymentReconcilerInterface' ) ) {
+			return;
+		}
+
+		$client = new YSJkopayClient();
+		if ( ! $client->is_configured() || ! is_object( $registry ) || ! method_exists( $registry, 'register' ) ) {
+			return;
+		}
+
+		$registry->register( new YSJkopayPaymentReconciler( $client ) );
 	}
 }
