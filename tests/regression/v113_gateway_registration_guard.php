@@ -12,6 +12,7 @@ if ( PHP_SAPI !== 'cli' && ! defined( 'ABSPATH' ) ) {
 $root   = dirname( __DIR__, 2 );
 $main   = file_get_contents( $root . '/ys-cart-jkopay.php' ) ?: '';
 $plugin = file_get_contents( $root . '/src/Plugin.php' ) ?: '';
+$settings = file_get_contents( $root . '/src/Gateway/Jkopay/YSJkopaySettings.php' ) ?: '';
 
 $pass = 0;
 $fail = 0;
@@ -64,6 +65,15 @@ v113_check(
 	'legacy provider/menu hooks are not used',
 	! str_contains( $plugin, "ys_ec_providers" )
 		&& ! str_contains( $plugin, "ys_ec_admin_payment_menus" )
+);
+
+v113_check(
+	'settings save mirrors the single JKoPay method into L3 lifecycle state',
+	str_contains( $settings, 'YSProviderLifecycleState::get_methods_state( \'payment\' )' )
+		&& str_contains( $settings, 'YSJkopayGateway::GATEWAY_ID' )
+		&& str_contains( $settings, "\$state[ \$method_id ]['enabled']     = \$enabled;" )
+		&& str_contains( $settings, "\$state[ \$method_id ]['provider_id'] = 'ys_jkopay';" )
+		&& str_contains( $settings, 'YSProviderLifecycleState::update_methods_state( \'payment\', $state )' )
 );
 
 echo "\nREGRESSION v113_gateway_registration_guard PASS={$pass} FAIL={$fail}\n";

@@ -84,6 +84,12 @@ v116_check(
 		&& str_contains($reconciler, 'YSJkopayWebhookHandler::META_TRADE_NO')
 );
 
+v116_check(
+	'Reconciler does not claim generic trade_no records from other payment providers',
+	str_contains($reconciler, "\$detail[ YSJkopayWebhookHandler::META_TRADE_NO ] ?? ''")
+		&& ! str_contains($reconciler, "\$detail['trade_no'] ?? ''")
+);
+
 preg_match('/Version:\s*([0-9.]+)/', $main, $version_match);
 preg_match("/YS_CART_JKOPAY_VERSION', '([0-9.]+)'/", $main, $constant_match);
 v116_check(

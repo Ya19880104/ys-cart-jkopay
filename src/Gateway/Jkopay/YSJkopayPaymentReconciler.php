@@ -22,7 +22,7 @@ final class YSJkopayPaymentReconciler implements YSPaymentReconcilerInterface {
 		return YSJkopayGateway::GATEWAY_ID === $gateway_id
 			|| YSJkopayGateway::GATEWAY_ID === (string) ( $order->payment_method ?? '' )
 			|| '' !== (string) ( $detail['ys_jkopay_platform_order_id'] ?? '' )
-			|| '' !== (string) ( $detail[ YSJkopayWebhookHandler::META_TRADE_NO ] ?? $detail['trade_no'] ?? '' );
+			|| '' !== (string) ( $detail[ YSJkopayWebhookHandler::META_TRADE_NO ] ?? '' );
 	}
 
 	public function reconcile( object $order ): YSPaymentReconcileResult {

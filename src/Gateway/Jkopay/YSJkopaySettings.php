@@ -320,5 +320,24 @@ class YSJkopaySettings {
         }
 
         \YangSheep\Ecommerce\Core\Provider\YSProviderLifecycleState::set_provider_enabled( 'ys_jkopay', $enabled, Plugin::manifest() );
+
+        $state     = \YangSheep\Ecommerce\Core\Provider\YSProviderLifecycleState::get_methods_state( 'payment' );
+        $method_id = YSJkopayGateway::GATEWAY_ID;
+        $order     = 0;
+
+        foreach ( $state as $row ) {
+            if ( is_array( $row ) && isset( $row['order'] ) ) {
+                $order = max( $order, (int) $row['order'] + 1 );
+            }
+        }
+
+        if ( ! isset( $state[ $method_id ] ) || ! is_array( $state[ $method_id ] ) ) {
+            $state[ $method_id ] = [ 'order' => $order++ ];
+        }
+
+        $state[ $method_id ]['enabled']     = $enabled;
+        $state[ $method_id ]['provider_id'] = 'ys_jkopay';
+
+        \YangSheep\Ecommerce\Core\Provider\YSProviderLifecycleState::update_methods_state( 'payment', $state );
     }
 }
