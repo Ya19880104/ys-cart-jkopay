@@ -36,6 +36,7 @@ defined( 'ABSPATH' ) || exit;
 use YangSheep\YSCartJkopay\Gateway\Jkopay\YSJkopayClient;
 use YangSheep\YSCartJkopay\Gateway\Jkopay\YSJkopayWebhookHandler;
 use YangSheep\Ecommerce\Models\YSOrder;
+use YangSheep\Ecommerce\Security\YSInboundPermission;
 use YangSheep\Ecommerce\Security\YSRateLimiter;
 use YangSheep\Ecommerce\Security\YSWebhookGuard;
 use YangSheep\Ecommerce\Utils\YSLogger;
@@ -80,9 +81,21 @@ class YSJkopayCallbackController {
         register_rest_route( self::REST_NAMESPACE, '/payment/jkopay/callback', [
             'methods'             => 'POST',
             'callback'            => [ __CLASS__, 'handle_callback' ],
-            // permission 由 HMAC 驗證；此處放行給街口的 server-to-server 呼叫
-            'permission_callback' => '__return_true',
+            'permission_callback' => [ __CLASS__, 'callback_permission' ],
         ] );
+    }
+
+    public static function callback_permission( \WP_REST_Request $request ) {
+        if ( ! class_exists( YSInboundPermission::class ) ) {
+            return true;
+        }
+
+        $callback = YSInboundPermission::build( self::REPLAY_CONTEXT, [
+            'body_max_bytes' => self::MAX_BODY_BYTES,
+            'rate_limit'     => [ 300, 60 ],
+            'allowed_types'  => [ 'application/json', 'text/plain' ],
+        ] );
+        return $callback( $request );
     }
 
     /**

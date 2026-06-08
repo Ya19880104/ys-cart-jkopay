@@ -43,7 +43,7 @@ return [
 		'icon'                => 'dashicons-money-alt',
 	],
 	'callback_routes'    => [
-		'payment_notify' => [ 'namespace' => 'ys-ecommerce-headless/v1', 'route' => '/payment/jkopay/callback', 'methods' => [ 'POST' ], 'signature_scheme' => 'jkopay_hmac' ],
+		'payment_notify' => [ 'namespace' => 'ys-ecommerce-headless/v1', 'route' => '/payment/jkopay/callback', 'methods' => [ 'POST' ], 'permission_callback' => [ \YangSheep\YSCartJkopay\Api\YSJkopayCallbackController::class, 'callback_permission' ], 'signature_scheme' => 'jkopay_hmac' ],
 	],
 	'allowed_hosts'      => [
 		'uat-onlinepay.jkopay.app',
