@@ -20,6 +20,10 @@ External JKoPay gateway provider for YS CART.
 Use YS CART checkout APIs as usual. When an order selects `ys_ec_jkopay`, the gateway creates the JKoPay payment request and returns the provider redirect/payment data through the YS CART checkout response.
 
 The callback route is for JKoPay server notifications. It verifies the provider digest/signature and should not be called directly by storefront code.
+The admin test route requires authenticated admin capability and a valid nonce;
+it is not a storefront route.
+Status/reconciler lookups are provider-scoped and must match JKoPay identifiers
+stored by this gateway.
 
 ## YS Hub updates
 

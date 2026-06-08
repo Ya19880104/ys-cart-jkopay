@@ -19,6 +19,7 @@ JKoPay notifications should be sent to:
 ```
 
 The callback route validates provider payloads and updates the YS CART order through the payment lifecycle. It is not a storefront route.
+Do not call it from browser UI.
 
 ## Admin test route
 
@@ -29,9 +30,11 @@ Authenticated YS CART admins can test credentials through:
 ```
 
 The route requires an authenticated admin request and a valid nonce.
+It is not a storefront route and should not be bundled into public customer UI.
 
 ## Security notes
 
 - Keep all credentials in the YS CART admin settings page.
 - Do not expose platform credentials to the browser.
 - Treat provider callback requests as untrusted until signature validation succeeds.
+- Keep status/reconciler lookups provider-scoped to JKoPay identifiers.
