@@ -21,7 +21,7 @@ $check = static function (string $label, bool $ok) use (&$fail): void {
 preg_match('/Version:\s*([0-9.]+)/', $main, $version_match);
 preg_match("/YS_CART_JKOPAY_VERSION['\"]\s*,\s*['\"]([0-9.]+)['\"]/", $main, $constant_match);
 
-$check('plugin version bumped to 1.1.7 and header/constant match', '1.1.7' === ($version_match[1] ?? '') && '1.1.7' === ($constant_match[1] ?? ''));
+$check('plugin version header/constant match and >= 1.1.7', '' !== ($version_match[1] ?? '') && ($version_match[1] ?? '') === ($constant_match[1] ?? '') && version_compare($version_match[1] ?? '0', '1.1.7', '>='));
 $check('callback imports YSInboundPermission', str_contains($callback, 'use YangSheep\\Ecommerce\\Security\\YSInboundPermission;'));
 $check('callback exposes callback_permission', str_contains($callback, 'callback_permission'));
 $check('runtime callback no longer uses __return_true', ! str_contains($callback, "'permission_callback' => '__return_true'"));
