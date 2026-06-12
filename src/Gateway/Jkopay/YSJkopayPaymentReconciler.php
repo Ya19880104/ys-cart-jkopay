@@ -86,20 +86,60 @@ final class YSJkopayPaymentReconciler implements YSPaymentReconcilerInterface {
 		$trade_no = (string) ( $payload['tradeNo'] ?? $payload['trade_no'] ?? '' );
 		$status   = $this->extract_status( $payload );
 
-		return YSPaymentDetailDTO::from_legacy_array(
-			[
-				'payment_type'                  => 'jkopay',
-				'trade_status'                  => (string) $status,
-				'trade_no'                      => $trade_no,
-				'gateway_trade_no'              => $trade_no,
-				'mer_trade_no'                  => $platform_order_id,
-				'response_code'                 => (string) ( $payload['result'] ?? $status ),
-				'response_message'              => (string) ( $payload['code_msg'] ?? $payload['message'] ?? '' ),
-				'ys_jkopay_platform_order_id'   => $platform_order_id,
-				YSJkopayWebhookHandler::META_TRADE_NO => $trade_no,
-				YSJkopayWebhookHandler::META_LAST_STATUS => $status,
-			],
-			YSJkopayGateway::GATEWAY_ID
-		);
+		$legacy = [
+			'payment_type'                  => 'jkopay',
+			'trade_status'                  => (string) $status,
+			'trade_no'                      => $trade_no,
+			'gateway_trade_no'              => $trade_no,
+			'mer_trade_no'                  => $platform_order_id,
+			'response_code'                 => (string) ( $payload['result'] ?? $status ),
+			'response_message'              => (string) ( $payload['code_msg'] ?? $payload['message'] ?? '' ),
+			'ys_jkopay_platform_order_id'   => $platform_order_id,
+			YSJkopayWebhookHandler::META_TRADE_NO => $trade_no,
+			YSJkopayWebhookHandler::META_LAST_STATUS => $status,
+		];
+
+		// v2.39.x 安全修正：補上 paid_amount，讓 reconcile → mark_paid 也受核心金額守衛保護
+		// （守衛在 paid_amount <= 0 時 fail-open，缺金額等於不核對）。
+		// inquiry 回傳的金額在 result_object.transactions[].final_price（訂單實際消費金額，
+		// 整數元 TWD，與 order->total 同單位）。
+		$paid_amount = $this->extract_paid_amount( $payload );
+		if ( null !== $paid_amount ) {
+			$legacy['paid_amount'] = $paid_amount;
+		}
+
+		return YSPaymentDetailDTO::from_legacy_array( $legacy, YSJkopayGateway::GATEWAY_ID );
+	}
+
+	/**
+	 * 從 inquiry payload 取出 final_price（訂單實際消費金額）。
+	 *
+	 * inquiry 回傳結構為 result_object.transactions[]（陣列）；本 reconciler 的
+	 * flatten_payload() 已把 result_object merge 進 $payload，但 transactions 仍是巢狀陣列，
+	 * 因此這裡額外從 transactions[0] 取 final_price。
+	 *
+	 * 防禦性：取不到或非數值時回 null（不回 0），避免讓核心守衛 fail-open。
+	 *
+	 * @param array<string,mixed> $payload flatten 後的 inquiry payload
+	 * @return float|null
+	 */
+	private function extract_paid_amount( array $payload ): ?float {
+		$first_tx = [];
+		if ( isset( $payload['transactions'][0] ) && is_array( $payload['transactions'][0] ) ) {
+			$first_tx = $payload['transactions'][0];
+		}
+
+		$raw = $payload['final_price']
+			?? $first_tx['final_price']
+			?? $payload['total_price']
+			?? $first_tx['total_price']
+			?? null;
+
+		if ( null === $raw || ! is_numeric( $raw ) ) {
+			return null;
+		}
+
+		$amount = (float) $raw;
+		return $amount > 0 ? $amount : null;
 	}
 }

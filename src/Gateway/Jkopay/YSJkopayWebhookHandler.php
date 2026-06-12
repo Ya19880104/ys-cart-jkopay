@@ -142,6 +142,16 @@ class YSJkopayWebhookHandler {
 
         switch ( $mapped ) {
             case 'success':                    // 0 — 付款成功
+                // v2.39.x 安全：若 payload 取不到 final_price，paid_amount 會缺席 →
+                // 核心金額守衛 fail-open（不核對金額）。這是高風險情境，明確記 warning
+                // 供營運稽核（仍照街口成功通知推進，避免合法訂單卡死，但留下軌跡）。
+                if ( null === self::extract_paid_amount( $payload ) ) {
+                    YSLogger::warning( 'jkopay_webhook', '付款成功但 payload 缺 final_price，金額守衛無法核對', [
+                        'order_id'    => $order_id,
+                        'trade_no'    => $trade_no,
+                        'order_total' => (float) ( $order->total ?? 0 ),
+                    ] );
+                }
                 $result = YSPaymentLifecycleService::mark_paid(
                     $order_id,
                     $detail_dto,
@@ -223,15 +233,62 @@ class YSJkopayWebhookHandler {
      * 建立 DTO（用於餵給 YSPaymentLifecycleService）
      *
      * 沒有為街口 specific 寫 factory，借用 from_legacy_array() + gateway_id_hint。
+     *
+     * v2.39.x 安全修正：補上 `paid_amount`（街口回傳的訂單實際消費金額）。
+     * 核心 YSPaymentLifecycleService::transition_to 在進入 processing 時，會用
+     * paid_amount_matches_order 守衛比對「實付金額 vs order->total」；但該守衛在
+     * paid_amount <= 0 時 fail-open（return true）。先前本 handler 沒帶 paid_amount，
+     * 守衛因此變成 no-op，webhook 一收到付款成功就照原價開單入帳、完全不核對金額。
+     * 補上正確的 paid_amount 即可自動啟用核心既有的金額守衛（不需動 core）。
      */
     private static function build_detail_dto( array $payload, string $trade_no, string $status ): YSPaymentDetailDTO {
-        return YSPaymentDetailDTO::from_legacy_array( [
+        $legacy = [
             'payment_type'     => 'jkopay',
             'trade_status'     => $status,
             'trade_no'         => $trade_no,
             'gateway_trade_no' => $trade_no,
             'response_code'    => (string) ( $payload['result']   ?? '' ),
             'response_message' => (string) ( $payload['code_msg'] ?? '' ),
-        ], 'ys_ec_jkopay' );
+        ];
+
+        // 街口 result_url callback 的金額在 transaction.final_price（訂單實際消費金額，
+        // = redeem_amount + debit_amount，與送單時的 final_price / order->total 同為整數元 TWD）。
+        $paid_amount = self::extract_paid_amount( $payload );
+        if ( null !== $paid_amount ) {
+            $legacy['paid_amount'] = $paid_amount;
+        }
+
+        return YSPaymentDetailDTO::from_legacy_array( $legacy, 'ys_ec_jkopay' );
+    }
+
+    /**
+     * 從街口 callback payload 取出「訂單實際消費金額」(final_price)。
+     *
+     * 街口 result_url callback 結構為 `{ "transaction": { ..., "final_price": "1000" } }`，
+     * final_price 為字串型態、單位為元（TWD 整數，與 order->total 同單位，無需換算）。
+     *
+     * 防禦性：街口 spec 雖標 final_price 為必要欄位，但若實際 payload 缺欄位或非數值，
+     * 回傳 null（而非 0）——讓 caller 不要把 paid_amount 設為 0，以免觸發核心守衛的
+     * fail-open（paid_amount <= 0 → return true）反而讓金額核對失效。
+     *
+     * @param array $payload handler 收到的 payload（callback controller 已塞入完整 transaction）
+     * @return float|null 取得到的金額（> 0）；取不到時為 null
+     */
+    private static function extract_paid_amount( array $payload ): ?float {
+        $transaction = is_array( $payload['transaction'] ?? null ) ? $payload['transaction'] : [];
+
+        // 主要欄位 final_price；保留 total_price 作為極少數舊 payload 的後備。
+        $raw = $transaction['final_price']
+            ?? $transaction['total_price']
+            ?? $payload['final_price']
+            ?? $payload['total_price']
+            ?? null;
+
+        if ( null === $raw || ! is_numeric( $raw ) ) {
+            return null;
+        }
+
+        $amount = (float) $raw;
+        return $amount > 0 ? $amount : null;
     }
 }
