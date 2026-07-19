@@ -1,0 +1,60 @@
+<?php
+/**
+ * Contract regression: 退款 pre-send persist 檢查（CODEX 終審 R6-F3）。
+ *
+ * 保證 YSJkopayGateway::process_refund：
+ *   (1) refund_order_id（對街口的冪等憑證）落盤失敗 → 中止、不呼叫 client
+ *   (2) 持久化檢查出現在 client refund 呼叫**之前**（順序契約）——否則 crash 後
+ *       retry 會產生新 refund_order_id 再送一次＝重複退款
+ *
+ * Run: php tests/regression/v120_refund_presend_persist_contract.php
+ */
+
+declare( strict_types = 1 );
+
+$base = dirname( __DIR__, 2 );
+$src  = file_get_contents( $base . '/src/Gateway/Jkopay/YSJkopayGateway.php' );
+
+if ( false === $src ) {
+	echo "FATAL: cannot read YSJkopayGateway.php\n";
+	exit( 1 );
+}
+
+$src = str_replace( "\r\n", "\n", $src );
+
+$pass = 0;
+$fail = 0;
+$assert = static function ( bool $ok, string $label ) use ( &$pass, &$fail ): void {
+	if ( $ok ) {
+		++$pass;
+		echo "  PASS  {$label}\n";
+		return;
+	}
+	++$fail;
+	echo "  FAIL  {$label}\n";
+};
+
+$m_start = strpos( $src, 'public function process_refund(' );
+$assert( false !== $m_start, '(0) process_refund 方法存在' );
+$method = false !== $m_start ? substr( $src, $m_start ) : '';
+
+// (1) 持久化結果被檢查、失敗訊息明示「未送出」
+$assert(
+	1 === preg_match( '/if\s*\(\s*!\s*YSOrder::update\(/', $method ),
+	'(1a) refund_order_id 持久化結果被檢查（if ( ! YSOrder::update）'
+);
+$assert(
+	str_contains( $method, '未送出街口退款請求' ),
+	'(1b) 寫入失敗訊息明示「未送出」（金流未動、可安全重試）'
+);
+
+// (2) 順序契約：persist 檢查在 client refund 呼叫之前
+$pos_check = strpos( $method, '未送出街口退款請求' );
+$pos_call  = strpos( $method, '->refund(' );
+$assert(
+	false !== $pos_check && false !== $pos_call && $pos_check < $pos_call,
+	'(2) 持久化檢查在 client refund 呼叫之前'
+);
+
+echo "\njkopay refund pre-send persist contract: {$pass} PASS / {$fail} FAIL\n";
+exit( $fail > 0 ? 1 : 0 );

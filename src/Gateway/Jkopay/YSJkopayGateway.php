@@ -424,9 +424,21 @@ class YSJkopayGateway implements YSGatewayInterface {
             $payment_detail['_ys_jkopay_refunds'] = $refund_history;
             // 也保留舊欄位最近一次值，避免外部讀舊 key 找不到（只是 informational mirror）
             $payment_detail['_ys_jkopay_refund_id'] = $refund_order_id;
-            YSOrder::update( (int) $order_id, [
+            // v2.56.4（CODEX 終審 R6-F3）：refund_order_id 是對街口的冪等憑證，落盤
+            // 失敗絕不可送出——否則 crash 後 retry 會產生新 refund_order_id 再送一次
+            // ＝重複退款。寫入失敗＝金流未動，中止讓 caller 安全重試。
+            if ( ! YSOrder::update( (int) $order_id, [
                 'payment_detail' => wp_json_encode( $payment_detail ),
-            ] );
+            ] ) ) {
+                YSLogger::error( 'jkopay', '退款 refund_order_id 持久化失敗，已中止（未送出退款請求）', [
+                    'order_id'        => $order_id,
+                    'refund_order_id' => $refund_order_id,
+                ] );
+                return [
+                    'success' => false,
+                    'message' => '退款請求無法持久化（冪等憑證寫入失敗），已中止；未送出街口退款請求，請重試。',
+                ];
+            }
         }
 
         $result = $this->get_client()->refund( $platform_id, $refund_order_id, $refund_amount );
