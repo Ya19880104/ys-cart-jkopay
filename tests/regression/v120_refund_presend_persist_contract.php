@@ -56,5 +56,18 @@ $assert(
 	'(2) 持久化檢查在 client refund 呼叫之前'
 );
 
+// ── R7-F1：typed outcome（indeterminate vs rejected_terminal）──
+$client_src = str_replace( "\r\n", "\n", (string) file_get_contents( $base . '/src/Gateway/Jkopay/YSJkopayClient.php' ) );
+$assert(
+	substr_count( $client_src, "'indeterminate' => true" ) >= 2
+	&& str_contains( $client_src, "'indeterminate' => false" ),
+	'(3) client：連線/非 2xx→indeterminate=true、result≠000→indeterminate=false'
+);
+$assert(
+	str_contains( $method, "! empty( \$result['indeterminate'] ) ? 'indeterminate' : 'rejected_terminal'" )
+	&& str_contains( $method, "'outcome' => 'rejected_terminal'" ),
+	'(4) gateway 依 indeterminate 組 typed outcome（pre-send terminal／結果不明凍結）'
+);
+
 echo "\njkopay refund pre-send persist contract: {$pass} PASS / {$fail} FAIL\n";
 exit( $fail > 0 ? 1 : 0 );

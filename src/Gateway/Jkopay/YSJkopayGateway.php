@@ -336,9 +336,11 @@ class YSJkopayGateway implements YSGatewayInterface {
     }
 
     public function process_refund( int $order_id, float $amount, string $reason = '', array $context = [] ): array {
+        // R7-F1：pre-send 業務拒絕（金流未動）→ outcome=rejected_terminal（可安全重試）。
+        //         字面值＝與 core YSRefundHandler::REFUND_OUTCOME_* 契約一致。
         $order = YSOrder::find( $order_id );
         if ( ! $order ) {
-            return [ 'success' => false, 'message' => '訂單不存在。' ];
+            return [ 'success' => false, 'outcome' => 'rejected_terminal', 'message' => '訂單不存在。' ];
         }
 
         $payment_detail = json_decode( (string) ( $order->payment_detail ?? '{}' ), true ) ?: [];
@@ -347,12 +349,12 @@ class YSJkopayGateway implements YSGatewayInterface {
             ?? '' );
 
         if ( '' === $platform_id ) {
-            return [ 'success' => false, 'message' => '找不到街口對應的訂單編號。' ];
+            return [ 'success' => false, 'outcome' => 'rejected_terminal', 'message' => '找不到街口對應的訂單編號。' ];
         }
 
         $refund_amount = (int) round( $amount );
         if ( $refund_amount <= 0 ) {
-            return [ 'success' => false, 'message' => '退款金額不正確。' ];
+            return [ 'success' => false, 'outcome' => 'rejected_terminal', 'message' => '退款金額不正確。' ];
         }
 
         // ── 讀取既有退款歷史 ──
@@ -436,6 +438,7 @@ class YSJkopayGateway implements YSGatewayInterface {
                 ] );
                 return [
                     'success' => false,
+                    'outcome' => 'rejected_terminal',
                     'message' => '退款請求無法持久化（冪等憑證寫入失敗），已中止；未送出街口退款請求，請重試。',
                 ];
             }
@@ -459,12 +462,18 @@ class YSJkopayGateway implements YSGatewayInterface {
             ];
         }
 
+        // R7-F1：依 client 的 indeterminate 旗標組 typed outcome——傳輸/非 2xx 不確定→
+        // indeterminate（core 凍結、禁重送）；明確拒絕（result≠000）→rejected_terminal（可重試）。
+        // 字面值＝與 core YSRefundHandler::REFUND_OUTCOME_* 契約一致。
+        $refund_outcome = ! empty( $result['indeterminate'] ) ? 'indeterminate' : 'rejected_terminal';
         YSLogger::error( 'jkopay', '退款失敗', [
             'order_id' => $order_id,
+            'outcome'  => $refund_outcome,
             'message'  => $result['message'],
         ] );
         return [
             'success' => false,
+            'outcome' => $refund_outcome,
             'message' => $result['message'] ?: '街口支付退款失敗。',
         ];
     }

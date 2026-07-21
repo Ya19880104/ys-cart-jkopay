@@ -287,10 +287,12 @@ class YSJkopayClient {
                 'endpoint' => $endpoint,
                 'error'    => $response->get_error_message(),
             ] );
+            // R7-F1：連線層失敗（timeout 等）＝結果不明——退款 caller 據此凍結而非重送。
             return [
-                'success' => false,
-                'data'    => null,
-                'message' => '連線失敗：' . $response->get_error_message(),
+                'success'       => false,
+                'indeterminate' => true,
+                'data'          => null,
+                'message'       => '連線失敗：' . $response->get_error_message(),
             ];
         }
 
@@ -307,10 +309,12 @@ class YSJkopayClient {
         ] );
 
         if ( $code < 200 || $code >= 300 ) {
+            // R7-F1：HTTP 非 2xx＝伺服器層不確定（server 可能已收並處理）→ indeterminate。
             return [
-                'success' => false,
-                'data'    => is_array( $data ) ? $data : null,
-                'message' => is_array( $data )
+                'success'       => false,
+                'indeterminate' => true,
+                'data'          => is_array( $data ) ? $data : null,
+                'message'       => is_array( $data )
                     ? ( $data['code_msg'] ?? "API 錯誤（HTTP {$code}）" )
                     : "API 錯誤（HTTP {$code}）",
             ];
@@ -319,17 +323,20 @@ class YSJkopayClient {
         // 街口協定：result === '000' 視為成功，其餘為失敗
         $result_code = (string) ( $data['result'] ?? '' );
         if ( '000' !== $result_code ) {
+            // R7-F1：HTTP 2xx 但業務碼非 000＝provider 明確拒絕（terminal，可安全重試）。
             return [
-                'success' => false,
-                'data'    => is_array( $data ) ? $data : null,
-                'message' => (string) ( $data['code_msg'] ?? "街口錯誤碼 {$result_code}" ),
+                'success'       => false,
+                'indeterminate' => false,
+                'data'          => is_array( $data ) ? $data : null,
+                'message'       => (string) ( $data['code_msg'] ?? "街口錯誤碼 {$result_code}" ),
             ];
         }
 
         return [
-            'success' => true,
-            'data'    => is_array( $data ) ? $data : [],
-            'message' => '',
+            'success'       => true,
+            'indeterminate' => false,
+            'data'          => is_array( $data ) ? $data : [],
+            'message'       => '',
         ];
     }
 }
