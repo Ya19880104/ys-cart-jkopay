@@ -69,5 +69,12 @@ $assert(
 	'(4) gateway 依 indeterminate 組 typed outcome（pre-send terminal／結果不明凍結）'
 );
 
+// (5) R8-F1：2xx 但不符成功 envelope（JSON 無效／缺 result）→ indeterminate。
+$assert(
+	str_contains( $client_src, "! isset( \$data['result'] )" )
+	&& str_contains( $client_src, '街口回應缺少 result 業務碼' ),
+	'(5) R8-F1：HTTP 2xx 但 JSON 無效／缺 result → indeterminate（非 terminal）'
+);
+
 echo "\njkopay refund pre-send persist contract: {$pass} PASS / {$fail} FAIL\n";
 exit( $fail > 0 ? 1 : 0 );

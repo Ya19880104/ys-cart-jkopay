@@ -320,14 +320,32 @@ class YSJkopayClient {
             ];
         }
 
+        // R8-F1：2xx 但**不符成功 envelope**（body 非有效 JSON 物件／缺 result 業務碼）＝
+        // 無法判定街口是否已處理 → indeterminate。舊版把「JSON 無效或缺 result」歸成
+        // terminal，會解除凍結、允許再次退款＝重複退款風險（CODEX 終審 R8-F1）。
+        if ( ! is_array( $data ) || ! isset( $data['result'] ) || '' === trim( (string) $data['result'] ) ) {
+            YSLogger::error( 'jkopay', 'API 回應不符 envelope（缺 result）', [
+                'endpoint'  => $endpoint,
+                'http_code' => $code,
+                'raw_head'  => substr( (string) $raw, 0, 200 ),
+            ] );
+            return [
+                'success'       => false,
+                'indeterminate' => true,
+                'data'          => is_array( $data ) ? $data : null,
+                'message'       => '街口回應缺少 result 業務碼（回應異常，結果未明）。',
+            ];
+        }
+
         // 街口協定：result === '000' 視為成功，其餘為失敗
-        $result_code = (string) ( $data['result'] ?? '' );
+        $result_code = (string) $data['result'];
         if ( '000' !== $result_code ) {
-            // R7-F1：HTTP 2xx 但業務碼非 000＝provider 明確拒絕（terminal，可安全重試）。
+            // R7-F1：HTTP 2xx 且 envelope 完整但業務碼非 000＝provider 明確拒絕
+            // （terminal，可安全重試）。
             return [
                 'success'       => false,
                 'indeterminate' => false,
-                'data'          => is_array( $data ) ? $data : null,
+                'data'          => $data,
                 'message'       => (string) ( $data['code_msg'] ?? "街口錯誤碼 {$result_code}" ),
             ];
         }
