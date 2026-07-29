@@ -124,17 +124,32 @@ class YSJkopayWebhookHandler {
         $detail_dto = self::build_detail_dto( $payload, $trade_no, $status );
 
         // ── 立刻寫入 trade_no + last_status（即使 transition 被擋住，也要記錄這次看過） ──
-        // 這層寫入用 YSOrder::update 直接 set，是 DTO 之外的 provider-specific bookkeeping
-        $existing_detail[ self::META_TRADE_NO ]    = $trade_no;
-        $existing_detail[ self::META_LAST_STATUS ] = $status;        // 整數
-        $existing_detail['ys_jkopay_platform_order_id'] = $platform_id;
-        $existing_detail['ys_jkopay_status_label']      = self::STATUS_LABELS[ $status ] ?? (string) $status;
-        $existing_detail['ys_jkopay_callback_at']       = current_time( 'mysql' );
-
-        YSOrder::update( $order_id, [
-            'gateway_trade_no' => $trade_no ?: ( $order->gateway_trade_no ?? '' ),
-            'payment_detail'   => wp_json_encode( $existing_detail ),
-        ] );
+        // R14（CODEX 跨 repo 金融一致性）：改 **CAS mutator 寫入**——舊 whole-JSON
+        // 盲寫以進場 stale $order 做 RMW，會在 core 退款 CAS 成功後反向整包覆蓋
+        // ledger；寫入失敗必須消費（不得繼續 transition）。
+        $detail_written = self::cas_update_payment_detail(
+            $order_id,
+            static function ( array $fresh_detail ) use ( $trade_no, $status, $platform_id ): array {
+                $fresh_detail[ self::META_TRADE_NO ]    = $trade_no;
+                $fresh_detail[ self::META_LAST_STATUS ] = $status;        // 整數
+                $fresh_detail['ys_jkopay_platform_order_id'] = $platform_id;
+                $fresh_detail['ys_jkopay_status_label']      = self::STATUS_LABELS[ $status ] ?? (string) $status;
+                $fresh_detail['ys_jkopay_callback_at']       = current_time( 'mysql' );
+                return $fresh_detail;
+            },
+            [ 'gateway_trade_no' => $trade_no ?: (string) ( $order->gateway_trade_no ?? '' ) ]
+        );
+        if ( ! $detail_written ) {
+            YSLogger::error( 'jkopay_webhook', 'CRITICAL: webhook payment_detail 寫入失敗（中止，不進行狀態轉換）', [
+                'order_id' => $order_id,
+                'trade_no' => $trade_no,
+            ] );
+            return [
+                'success' => false,
+                'action'  => 'persist_failed',
+                'message' => 'payment_detail persist failed.',
+            ];
+        }
 
         // ── 狀態映射 → 推進（v2.38.1 G2：整數對應 STATUS_MAP）──
         $action = 'no_transition';
@@ -290,5 +305,72 @@ class YSJkopayWebhookHandler {
 
         $amount = (float) $raw;
         return $amount > 0 ? $amount : null;
+    }
+
+    /**
+     * payment_detail 的 CAS mutator 寫入（R14：跨 repo writer ownership 統一）
+     *
+     * fresh read（穿透模型層快取）→ mutator 重算 → 真 CAS（WHERE payment_detail=
+     * 舊 raw、NULL 用 IS NULL）→ 落敗重讀重放（bounded retry）。同值＝合法冪等
+     * no-op；SQL 失敗（false）不重試。附帶欄位同語句 SET；欄名為程式內常數。
+     */
+    private static function cas_update_payment_detail( int $order_id, callable $mutator, array $also_fields = [] ): bool {
+        global $wpdb;
+        $table = $wpdb->prefix . 'ys_ec_orders';
+        for ( $i = 0; $i < 3; $i++ ) {
+            if ( method_exists( YSOrder::class, 'forget' ) ) {
+                YSOrder::forget( $order_id );
+            }
+            $fresh = YSOrder::find( $order_id );
+            if ( ! $fresh ) {
+                return false;
+            }
+            $old_raw = $fresh->payment_detail;
+            $detail  = json_decode( (string) ( $old_raw ?? '{}' ), true );
+            if ( ! is_array( $detail ) ) {
+                $detail = [];
+            }
+            $mutated = $mutator( $detail );
+            if ( null === $mutated ) {
+                return true;
+            }
+            $new_raw    = wp_json_encode( $mutated );
+            $alsos_same = true;
+            foreach ( $also_fields as $column => $value ) {
+                if ( (string) ( $fresh->{$column} ?? '' ) !== (string) $value ) {
+                    $alsos_same = false;
+                    break;
+                }
+            }
+            if ( $new_raw === $old_raw && $alsos_same ) {
+                return true; // 目標值已達＝冪等 no-op
+            }
+            $sets   = [ 'payment_detail = %s' ];
+            $values = [ $new_raw ];
+            foreach ( $also_fields as $column => $value ) {
+                $sets[]   = "`{$column}` = %s";
+                $values[] = (string) $value;
+            }
+            $values[] = $order_id;
+            if ( null === $old_raw ) {
+                $sql = "UPDATE {$table} SET " . implode( ', ', $sets ) . ' WHERE id = %d AND payment_detail IS NULL';
+            } else {
+                $sql      = "UPDATE {$table} SET " . implode( ', ', $sets ) . ' WHERE id = %d AND payment_detail = %s';
+                $values[] = (string) $old_raw;
+            }
+            // phpcs:ignore WordPress.DB.DirectDatabaseQuery,WordPress.DB.PreparedSQL.NotPrepared
+            $updated = $wpdb->query( $wpdb->prepare( $sql, ...$values ) );
+            if ( false === $updated ) {
+                return false; // SQL 失敗（≠CAS 落敗）
+            }
+            if ( 1 === (int) $updated ) {
+                if ( method_exists( YSOrder::class, 'forget' ) ) {
+                    YSOrder::forget( $order_id );
+                }
+                return true;
+            }
+            // 0 rows＝CAS 落敗（期間被改寫）→ 重讀重放
+        }
+        return false;
     }
 }
