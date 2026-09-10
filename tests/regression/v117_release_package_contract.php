@@ -2,15 +2,25 @@
 declare(strict_types=1);
 
 $root = dirname(__DIR__, 2);
-$artifacts = glob($root . '/artifacts/ys-cart-jkopay-*.zip') ?: [];
 
-if (!$artifacts) {
-    echo "v117_release_package_contract skipped: no release zip built yet\n";
+// 🔴 驗「本版要出貨的那一包」，不是「排序後的第一個」。
+//
+// 原本是 glob 全部 artifacts 後 `rsort` 取第一個。rsort 是**字串**排序：
+// '1.1.9' > '1.1.10'（比的是 '9' 和 '1'），所以版號一進兩位數，這個閘門就會
+// 繼續驗那個舊 zip 然後放行——真正要出貨的那一包從來沒被驗到，而且是綠的。
+$main = (string) file_get_contents($root . '/ys-cart-jkopay.php');
+preg_match('/^[ \t]*\*[ \t]*Version:[ \t]*([^\r\n]+)/m', $main, $header);
+$version = trim((string) ($header[1] ?? ''));
+if ('' === $version) {
+    fwrite(STDERR, "cannot read the plugin version from ys-cart-jkopay.php\n");
+    exit(1);
+}
+$zipPath = $root . '/artifacts/ys-cart-jkopay-' . $version . '.zip';
+
+if (!is_file($zipPath)) {
+    echo "v117_release_package_contract skipped: no release zip built for {$version} yet\n";
     exit(0);
 }
-
-rsort($artifacts);
-$zipPath = $artifacts[0];
 
 if (!class_exists('ZipArchive')) {
     fwrite(STDERR, "ZipArchive extension is required to inspect {$zipPath}\n");
